@@ -23,13 +23,13 @@ uint8_t* read_labels(const char* filename) {
 
     int magic_number = flip_endianness(header);
     int n = flip_endianness(header + 4);
-    printf("test labels magic number: %d\n", magic_number);
+    // printf("test labels magic number: %d\n", magic_number);
     if (magic_number != 2049) {
         fprintf(stderr, "Invalid magic number!\n");
         return NULL;
     }
     
-    printf("number of test labels: %d\n", n);
+    // printf("number of test labels: %d\n", n);
 
     uint8_t* labels = malloc(n * sizeof(uint8_t));
     fread(labels, sizeof(uint8_t), n, file);
@@ -59,15 +59,15 @@ Images* read_tests(const char* filename) {
     const int rows = flip_endianness(header + 8);
     const int cols = flip_endianness(header + 12);
 
-    printf("test images magic number: %d\n", magic_number);
+    // printf("test images magic number: %d\n", magic_number);
     if (magic_number != 2051) {
         fprintf(stderr, "Invalid magic number!\n");
         return NULL;
     }
     
-    printf("number of test images: %d\n", length);
-    printf("number of rows: %d\n", rows);
-    printf("number of cols: %d\n", cols);
+    // printf("number of test images: %d\n", length);
+    // printf("number of rows: %d\n", rows);
+    // printf("number of cols: %d\n", cols);
 
     uint8_t* data = malloc(length * rows * cols * sizeof(uint8_t));
     fread(data, sizeof(uint8_t), length * rows * cols, file);
@@ -328,6 +328,8 @@ int main() {
             forwardprop(layers, num_layers, nn_input);
             backprop(layers, num_layers, max_layer_size, nn_input, expected);
         }
+
+        printf("Epoch %d finished\n", epoch + 1);
     }
 
     const uint8_t* test_labels = read_labels("../t10k-labels.idx1-ubyte");
