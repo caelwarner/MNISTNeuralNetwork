@@ -75,7 +75,7 @@ void forward_propagation(NNLayer* layers, const int num_layers, const float* inp
         if (i < num_layers - 1) {
             relu(layers[i].activation, layers[i].activation, layers[i].size);
         } else {
-            sigmoid(layers[i].activation, layers[i].activation, layers[i].size);
+            softmax(layers[i].activation, layers[i].activation, layers[i].size);
         }
     }
 }
@@ -90,10 +90,9 @@ void backward_propagation(NNLayer* layers, const int num_layers, const int max_l
 
     float* activation_func_error = malloc(sizeof(float) * max_layer_size);
 
-    // Compute δ^L = (a^L - y) * (σ'(z^L)) for the output layer
+    // Using the softmax function and cross-entropy loss δ^L becomes very simple
+    // Compute δ^L = (a^L - y) for the output layer
     vector_sub(output_layer->activation, expected, layer_errors[num_layers - 1], output_layer->size);
-    sigmoid_d(output_layer->activation, activation_func_error, output_layer->size);
-    hadamard_product(layer_errors[num_layers - 1], activation_func_error, layer_errors[num_layers - 1], output_layer->size);
 
     // Wait to update weights for layer l until after the next layers error has been computed.
     // The next layers error is the only thing that depends on the current weights.
@@ -123,15 +122,18 @@ void backward_propagation(NNLayer* layers, const int num_layers, const int max_l
     free(activation_func_error);
 }
 
+/**
+ * Calculate cost using cross-entropy loss
+ */
 float cost(const float* nn_output, const float* expected) {
-    float ssd = 0.0f;
-
+    float cost = 0.0f;
     for (int i = 0; i < NUM_OUTPUTS; i++) {
-        const float diff = nn_output[i] - expected[i];
-        ssd += diff * diff;
+        if (expected[i] > 0.0f) {
+            cost -= expected[i] * logf(nn_output[i] + 1e-15f);
+        }
     }
 
-    return ssd;
+    return cost;
 }
 
 int main() {

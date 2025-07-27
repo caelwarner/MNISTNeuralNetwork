@@ -190,7 +190,7 @@ void relu_d(const float* input, float* output, const int n) {
 
 void sigmoid(const float* input, float* output, const int n) {
     for (int i = 0; i < n; i++) {
-        output[i] = 1.0f / (1.0f + exp(-input[i]));
+        output[i] = 1.0f / (1.0f + expf(-input[i]));
     }
 }
 
@@ -198,6 +198,17 @@ void sigmoid_d(const float* input, float* output, const int n) {
     for (int i = 0; i < n; i++) {
         output[i] = input[i] * (1.0f - input[i]);
     }  
+}
+
+void softmax(const float* input, float* output, const int n) {
+    float denominator = 0.0f;
+    for (int i = 0; i < n; i++) {
+        denominator += expf(input[i]);
+    }
+
+    for (int i = 0; i < n; i++) {
+        output[i] = expf(input[i]) / denominator;
+    }
 }
 
 int has_avx512_support() {

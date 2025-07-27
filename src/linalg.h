@@ -32,6 +32,7 @@ void relu(const float* input, float* output, int n);
 void relu_d(const float* input, float* output, int n);
 void sigmoid(const float* input, float* output, int n);
 void sigmoid_d(const float* input, float* output, int n);
+void softmax(const float* input, float* output, int n);
 
 int has_avx512_support();
 
