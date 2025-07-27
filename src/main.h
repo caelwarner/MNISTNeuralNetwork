@@ -8,7 +8,9 @@ static const int LAYER_SIZES[] = {128, 64, NUM_OUTPUTS};
 #define NUM_LAYERS (sizeof(LAYER_SIZES) / sizeof(int))
 
 #define NUM_EPOCHS 10
-#define LEARNING_RATE 0.001f
+#define INITIAL_LEARNING_RATE 0.01f
+#define LEARNING_RATE_STEP_SIZE 8
+#define LEARNING_RATE_DECAY 0.1f
 
 typedef struct {
     int size;
@@ -29,9 +31,10 @@ void free_layers(NNLayer* layers, int num_layers);
 float* get_layer_output(const NNLayer* layer, int num_layers);
 
 void generate_expected_vec(float* expected_vec, int expected);
+float get_learning_rate(int epoch);
 
 void forward_propagation(NNLayer* layers, int num_layers, const float* input);
-void backward_propagation(NNLayer* layers, int num_layers, int max_layer_size, const float* input, const float* expected);
+void backward_propagation(NNLayer* layers, int num_layers, int max_layer_size, const float* input, const float* expected, float learning_rate);
 float cost(const float* nn_output, const float* expected);
 
 #endif //MAIN_H

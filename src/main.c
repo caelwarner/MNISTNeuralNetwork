@@ -59,6 +59,10 @@ void generate_expected_vec(float* expected_vec, const int expected) {
     }
 }
 
+float get_learning_rate(const int epoch) {
+    return INITIAL_LEARNING_RATE * powf(LEARNING_RATE_DECAY, (float) epoch / LEARNING_RATE_STEP_SIZE);
+}
+
 void forward_propagation(NNLayer* layers, const int num_layers, const float* input) {
     for (int i = 0; i < num_layers; i++) {
         // Compute activation
@@ -80,7 +84,7 @@ void forward_propagation(NNLayer* layers, const int num_layers, const float* inp
     }
 }
 
-void backward_propagation(NNLayer* layers, const int num_layers, const int max_layer_size, const float* input, const float* expected) {
+void backward_propagation(NNLayer* layers, const int num_layers, const int max_layer_size, const float* input, const float* expected, float learning_rate) {
     const NNLayer* output_layer = &layers[num_layers - 1];
     // float* layer_errors[num_layers];
     float** layer_errors = malloc(sizeof(float*) * num_layers);
@@ -103,17 +107,17 @@ void backward_propagation(NNLayer* layers, const int num_layers, const int max_l
         hadamard_product(layer_errors[i], activation_func_error, layer_errors[i], layers[i].size);
         
         // Update weights for layer l + 1
-        // outer_product_add(layers[i + 1].weights, layers[i].activation, layer_errors[i + 1], -LEARNING_RATE, layers[i].size, layers[i + 1].size);
-        outer_product_add(layers[i + 1].weights, layer_errors[i + 1], layers[i].activation, -LEARNING_RATE, layers[i + 1].size, layers[i].size);
+        // outer_product_add(layers[i + 1].weights, layers[i].activation, layer_errors[i + 1], -learning_rate, layers[i].size, layers[i + 1].size);
+        outer_product_add(layers[i + 1].weights, layer_errors[i + 1], layers[i].activation, -learning_rate, layers[i + 1].size, layers[i].size);
 
         // Update biases for layer l + 1
-        vector_add_scaled(layers[i + 1].biases, layer_errors[i + 1], layers[i + 1].biases, -LEARNING_RATE, layers[i + 1].size);
+        vector_add_scaled(layers[i + 1].biases, layer_errors[i + 1], layers[i + 1].biases, -learning_rate, layers[i + 1].size);
     }
 
     // Compute weights and biases for the first hidden layer
-    // outer_product_add(layers[0].weights, input, layer_errors[0], -LEARNING_RATE, layers[0].prev_size, layers[0].size);
-    outer_product_add(layers[0].weights, layer_errors[0], input, -LEARNING_RATE, layers[0].size, layers[0].prev_size);
-    vector_add_scaled(layers[0].biases, layer_errors[0], layers[0].biases, -LEARNING_RATE, layers[0].size);
+    // outer_product_add(layers[0].weights, input, layer_errors[0], -learning_rate, layers[0].prev_size, layers[0].size);
+    outer_product_add(layers[0].weights, layer_errors[0], input, -learning_rate, layers[0].size, layers[0].prev_size);
+    vector_add_scaled(layers[0].biases, layer_errors[0], layers[0].biases, -learning_rate, layers[0].size);
 
     for (int i = 0; i < num_layers; i++) {
         _mm_free(layer_errors[i]);
@@ -180,7 +184,7 @@ int main() {
             }
 
             forward_propagation(layers, NUM_LAYERS, nn_input);
-            backward_propagation(layers, NUM_LAYERS, max_layer_size, nn_input, expected);
+            backward_propagation(layers, NUM_LAYERS, max_layer_size, nn_input, expected, get_learning_rate(epoch));
         }
 
         printf("Epoch %d finished\n", epoch + 1);
