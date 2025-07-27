@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <immintrin.h>
 
 #define NUM_OUTPUTS 10
 #define LEARNING_RATE 0.001f
@@ -12,7 +13,7 @@ int flip_endianness(const uint8_t* input) {
 }
 
 uint8_t* read_labels(const char* filename) {
-    FILE* file = fopen(filename, "r");
+    FILE* file = fopen(filename, "rb");
     if (file == NULL) {
         perror("Error opening file!\n");
         return NULL;
@@ -21,19 +22,19 @@ uint8_t* read_labels(const char* filename) {
     uint8_t header[8];
     fread(header, sizeof(int), 2, file);
 
-    int magic_number = flip_endianness(header);
-    int n = flip_endianness(header + 4);
-    // printf("test labels magic number: %d\n", magic_number);
+    const int magic_number = flip_endianness(header);
+    const int n = flip_endianness(header + 4);
+
     if (magic_number != 2049) {
         fprintf(stderr, "Invalid magic number!\n");
         return NULL;
     }
     
-    // printf("number of test labels: %d\n", n);
-
     uint8_t* labels = malloc(n * sizeof(uint8_t));
     fread(labels, sizeof(uint8_t), n, file);
 
+    fclose(file);
+    
     return labels;
 }
 
@@ -45,7 +46,7 @@ typedef struct {
 } Images;
 
 Images* read_tests(const char* filename) {
-    FILE* file = fopen(filename, "r");
+    FILE* file = fopen(filename, "rb");
     if (file == NULL) {
         perror("Error opening file!\n");
         return NULL;
@@ -59,16 +60,11 @@ Images* read_tests(const char* filename) {
     const int rows = flip_endianness(header + 8);
     const int cols = flip_endianness(header + 12);
 
-    // printf("test images magic number: %d\n", magic_number);
     if (magic_number != 2051) {
         fprintf(stderr, "Invalid magic number!\n");
         return NULL;
     }
     
-    // printf("number of test images: %d\n", length);
-    // printf("number of rows: %d\n", rows);
-    // printf("number of cols: %d\n", cols);
-
     uint8_t* data = malloc(length * rows * cols * sizeof(uint8_t));
     fread(data, sizeof(uint8_t), length * rows * cols, file);
 
@@ -78,6 +74,8 @@ Images* read_tests(const char* filename) {
     images->cols = cols;
     images->length = length;
 
+    fclose(file);
+    
     return images;
 }
 
@@ -91,9 +89,9 @@ typedef struct {
 
 void free_layers(NNLayer* layers, const int num_layers) {
     for (int i = 0; i < num_layers; i++) {
-        free(layers[i].weights);
-        free(layers[i].biases);
-        free(layers[i].activation);
+        _mm_free(layers[i].weights);
+        _mm_free(layers[i].biases);
+        _mm_free(layers[i].activation);
     }
     
     free(layers);   
@@ -114,9 +112,9 @@ NNLayer* create_layers(const int* layer_sizes, const int num_layers) {
     for (int i = 0; i < num_layers; i++) {
         layers[i].size = layer_sizes[i + 1];
         layers[i].prev_size = layer_sizes[i];
-        layers[i].weights = malloc(sizeof(float) * layer_sizes[i] * layer_sizes[i + 1]);
-        layers[i].biases = malloc(sizeof(float) * layer_sizes[i + 1]);
-        layers[i].activation = malloc(sizeof(float) * layer_sizes[i + 1]);
+        layers[i].weights = _mm_malloc(sizeof(float) * layer_sizes[i] * layer_sizes[i + 1], 64);
+        layers[i].biases = _mm_malloc(sizeof(float) * layer_sizes[i + 1], 64);
+        layers[i].activation = _mm_malloc(sizeof(float) * layer_sizes[i + 1], 64);
 
         for (int j = 0; j < layers[i].size * layers[i].prev_size; j++) {
             layers[i].weights[j] = he_uniform_init(layers[i].prev_size);
@@ -131,36 +129,110 @@ NNLayer* create_layers(const int* layer_sizes, const int num_layers) {
 }
 
 void matrix_vector_mult(const float* matrix, const float* vector, float* result, const int m, const int n) {
+#ifdef __AVX512F__
     for (int i = 0; i < m; i++) {
-        result[i] = 0.0f;
+        int j;
+        __m512 v_sum = _mm512_setzero_ps();
         
-        for (int j = 0; j < n; j++) {
+        for (j = 0; j <= n - 16; j += 16) {
+            const __m512 v_matrix = _mm512_load_ps(&matrix[i * n + j]);
+            const __m512 v_vector = _mm512_load_ps(&vector[j]);
+    
+            v_sum = _mm512_fmadd_ps(v_matrix, v_vector, v_sum);
+        }
+        
+        result[i] = _mm512_reduce_add_ps(v_sum);
+
+        for (; j < n; j++) {
             result[i] += matrix[i * n + j] * vector[j];
         }
     }
+#else
+    for (int i = 0; i < m; i++) {
+        result[i] = 0.0f;
+    
+        for (int j = 0; j < n; j++) {
+            result[i] += matrix[i * n + j] * vector[j];
+        }   
+    }
+#endif
 }
 
 void matrix_transpose_vector_mult(const float* matrix, const float* vector, float* result, const int m, const int n) {
     for (int i = 0; i < n; i++) {
         result[i] = 0.0f;
     }
+
+#ifdef __AVX512F__
+    for (int i = 0; i < m; i++) {
+        int j;
+        const __m512 v_vector = _mm512_set1_ps(vector[i]);
+        
+        for (j = 0; j <= n - 16; j += 16) {
+            const __m512 v_matrix = _mm512_load_ps(&matrix[i * n + j]);
+            __m512 v_result = _mm512_load_ps(&result[j]);
     
+            v_result = _mm512_fmadd_ps(v_matrix, v_vector, v_result);
+    
+            _mm512_store_ps(&result[j], v_result);
+        }
+    
+        for (; j < n; j++) {
+            result[j] += matrix[i * n + j] * vector[i];   
+        }
+    }
+#else
     for (int i = 0; i < m; i++) {
         for (int j = 0; j < n; j++) {
             result[j] += matrix[i * n + j] * vector[i];
         }
     }
+#endif
 }
 
 void outer_product_add(float* matrix, const float* vec_m, const float* vec_n, const float scalar, const int m, const int n) {
+#ifdef __AVX512F__
+    for (int i = 0; i < m; i++) {
+        int j;
+        const __m512 v_vec_m = _mm512_set1_ps(vec_m[i] * scalar);
+        
+        for (j = 0; j <= n - 16; j += 16) {
+            __m512 v_matrix = _mm512_load_ps(&matrix[i * n + j]);
+            const __m512 v_vec_n = _mm512_load_ps(&vec_n[j]);
+    
+            v_matrix = _mm512_fmadd_ps(v_vec_m, v_vec_n, v_matrix);
+    
+            _mm512_store_ps(&matrix[i * n + j], v_matrix);
+        }
+    
+        for (; j < n; j++) {
+            matrix[i * n + j] += vec_m[i] * vec_n[j] * scalar;
+        }
+    }
+#else
     for (int i = 0; i < m; i++) {
         for (int j = 0; j < n; j++) {
             matrix[i * n + j] += vec_m[i] * vec_n[j] * scalar;
         }
-    }  
+    }
+#endif
 }
 
 void vector_add(const float* a, const float* b, float* out, const int n) {
+    // int i;
+    // for (i = 0; i <= n - 16; i += 16) {
+    //     __m512 v_a = _mm512_load_ps(&a[i]);
+    //     __m512 v_b = _mm512_load_ps(&b[i]);
+    //
+    //     v_a = _mm512_add_ps(v_a, v_b);
+    //     
+    //     _mm512_store_ps(&out[i], v_a);
+    // }
+    //
+    // for (; i < n; i++) {
+    //     out[i] = a[i] + b[i];
+    // }
+    
     for (int i = 0; i < n; i++) {
         out[i] = a[i] + b[i];
     }
@@ -257,12 +329,13 @@ float cost(const float* nn_output, const float* expected) {
 
 void backprop(NNLayer* layers, const int num_layers, const int max_layer_size, const float* input, const float* expected) {
     NNLayer* output_layer = &layers[num_layers - 1];
-    float* layer_errors[num_layers];
+    // float* layer_errors[num_layers];
+    float** layer_errors = malloc(sizeof(float*) * num_layers);
     for (int i = 0; i < num_layers; i++) {
-        layer_errors[i] = malloc(sizeof(float) * layers[i].size);   
+        layer_errors[i] = _mm_malloc(sizeof(float) * layers[i].size, 64);   
     }
 
-    float activation_func_error[max_layer_size];
+    float activation_func_error[128]; // TODO: max_layer_size
 
     // Compute δ^L = (a^L - y) * (σ'(z^L)) for the output layer
     vector_sub(output_layer->activation, expected, layer_errors[num_layers - 1], output_layer->size);
@@ -291,8 +364,9 @@ void backprop(NNLayer* layers, const int num_layers, const int max_layer_size, c
     vector_add_in_place_scaled(layers[0].biases, layer_errors[0], -LEARNING_RATE, layers[0].size);
 
     for (int i = 0; i < num_layers; i++) {
-        free(layer_errors[i]);
+        _mm_free(layer_errors[i]);
     }
+    free(layer_errors);
 }
 
 int main() {
@@ -312,11 +386,14 @@ int main() {
     const int max_layer_size = 128;
     NNLayer* layers = create_layers(layer_sizes, 3);
 
-    float nn_input[images->rows * images->cols];
+    // float nn_input[images->rows * images->cols];
+    float* nn_input = _mm_malloc(sizeof(float) * images->rows * images->cols, 64);
     float expected[NUM_OUTPUTS];
 
     printf("Length: %d\n", images->length);
 
+    clock_t start = clock();
+    
     for (int epoch = 0; epoch < 10; epoch ++) {
         for (int i = 0; i < images->length; i++) {
             generate_expected_vec(expected, labels[i]);
@@ -332,9 +409,15 @@ int main() {
         printf("Epoch %d finished\n", epoch + 1);
     }
 
+    clock_t end = clock();
+    double cpu_time = (double) (end - start) / CLOCKS_PER_SEC;
+    printf("Training took: %f\n", cpu_time);
+    
     const uint8_t* test_labels = read_labels("../t10k-labels.idx1-ubyte");
     const Images* test_images = read_tests("../t10k-images.idx3-ubyte");
 
+    start = clock();
+    
     int total = 0;
     int correct = 0;
     for (int i = 0; i < test_images->length; i++) {
@@ -360,10 +443,15 @@ int main() {
         }
     }
 
+    end = clock();
+    cpu_time = (double) (end - start) / CLOCKS_PER_SEC;
+    printf("Testing took: %f\n", cpu_time);
+    
     printf("Total: %d\n", total);
     printf("Correct: %d\n", correct);
     printf("Accuracy: %f\n", (float) correct / (float) total);
-    
+
+    _mm_free(nn_input);
     free_layers(layers, num_layers);
     free(labels);
     free(images->data);
