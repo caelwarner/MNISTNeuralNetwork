@@ -13,7 +13,12 @@ if(NOT MSVC)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mavx512f")
 endif()
 
-add_executable(NeuralNetwork main.c)
+add_executable(NeuralNetwork src/main.c
+        src/linalg.c
+        src/linalg.h
+        src/io.c
+        src/io.h
+        src/main.h)
 
 
 if(NOT MSVC)
